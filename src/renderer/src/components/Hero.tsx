@@ -1,15 +1,18 @@
 import { useState } from 'react'
-import { typeLabel, type FolderRecord, type ImageRecord } from '@shared/types'
+import { typeLabel, type ImageRecord } from '@shared/types'
 import { formatBytes } from '../lib/format'
 
 interface Props {
-  folder: FolderRecord
+  folderName: string
   image: ImageRecord
+  busy: boolean
+  choosing: boolean
   onView: () => void
   onExplorer: () => void
+  onChoose: () => void
 }
 
-export function Hero({ folder, image, onView, onExplorer }: Props) {
+export function Hero({ folderName, image, busy, choosing, onView, onExplorer, onChoose }: Props) {
   const [src, setSrc] = useState(image.heroUrl)
   const [loaded, setLoaded] = useState(false)
 
@@ -27,7 +30,7 @@ export function Hero({ folder, image, onView, onExplorer }: Props) {
       />
       <div className="hero-shade" />
       <div className="hero-copy">
-        <p className="eyebrow">{folder.name}</p>
+        <p className="eyebrow">{folderName}</p>
         <h1 className="hero-title">{image.name}</h1>
         <p className="hero-meta">
           {typeLabel(image.ext)} · {formatBytes(image.size)}
@@ -38,6 +41,9 @@ export function Hero({ folder, image, onView, onExplorer }: Props) {
           </button>
           <button type="button" className="btn-ghost" onClick={onExplorer}>
             Open in Explorer
+          </button>
+          <button type="button" className="btn-ghost" onClick={onChoose} disabled={busy}>
+            {choosing ? 'Choosing…' : 'Choose banner'}
           </button>
         </div>
       </div>

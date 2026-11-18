@@ -1,12 +1,15 @@
 import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
 import { basename, extname, join, resolve, sep } from 'node:path'
 import { app, dialog, shell, type BrowserWindow } from 'electron'
-import { isImageFileName, type FolderRecord, type ImageDetails, type ImageRecord } from '../shared/types'
+import { isImageFileName, type FolderRecord, type ImageDetails, type ImageRecord, type LibrarySnapshot } from '../shared/types'
 import { readDimensions } from './dimensions'
 import { orientedSize, readExif } from './exif'
 
 const cache = new Map<string, FolderRecord>()
 let folderPaths: string[] = []
+let bannerPath: string | null = null
+
+const IMAGE_DIALOG_EXTENSIONS = ['jpg', 'jpeg', 'jpe', 'jfif', 'png', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'avif']
 
 function libraryFile(): string {
   return join(app.getPath('userData'), 'library.json')
@@ -68,26 +71,31 @@ async function mapPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise
   return results
 }
 
-async function readSavedFolders(): Promise<string[]> {
+async function readSavedLibrary(): Promise<{ folders: string[]; banner: string | null }> {
   let raw: string
   try {
     raw = await readFile(libraryFile(), 'utf8')
   } catch {
-    return []
+    return { folders: [], banner: null }
   }
   try {
-    const parsed = JSON.parse(raw) as { folders?: unknown }
-    if (!Array.isArray(parsed.folders)) return []
-    return parsed.folders.filter((folder): folder is string => typeof folder === 'string').map((folder) => resolve(folder))
+    const parsed = JSON.parse(raw) as { folders?: unknown; banner?: unknown }
+    const folders = Array.isArray(parsed.folders)
+      ? parsed.folders.filter((folder): folder is string => typeof folder === 'string').map((folder) => resolve(folder))
+      : []
+    const banner = typeof parsed.banner === 'string' && parsed.banner.length > 0 ? resolve(parsed.banner) : null
+    return { folders, banner }
   } catch {
     await writeFile(`${libraryFile()}.bak`, raw).catch(() => undefined)
-    return []
+    return { folders: [], banner: null }
   }
 }
 
-async function saveFolders(): Promise<void> {
+async function saveLibrary(): Promise<void> {
   await mkdir(app.getPath('userData'), { recursive: true })
-  await writeFile(libraryFile(), JSON.stringify({ folders: folderPaths }, null, 2), 'utf8')
+  const payload: { folders: string[]; banner?: string } = { folders: folderPaths }
+  if (bannerPath) payload.banner = bannerPath
+  await writeFile(libraryFile(), JSON.stringify(payload, null, 2), 'utf8')
 }
 
 async function actuallyScan(folderPath: string): Promise<FolderRecord> {
@@ -130,20 +138,37 @@ async function scanOrError(folderPath: string, force: boolean): Promise<FolderRe
   return row
 }
 
+async function bannerRecord(): Promise<ImageRecord | null> {
+  if (!bannerPath || !isImageFileName(bannerPath)) return null
+  try {
+    const info = await stat(bannerPath)
+    if (!info.isFile() || info.size <= 0) return null
+    return toRecord(bannerPath, info)
+  } catch {
+    return null
+  }
+}
+
+async function snapshot(force = false): Promise<LibrarySnapshot> {
+  const folders: FolderRecord[] = []
+  for (const folderPath of folderPaths) {
+    folders.push(await scanOrError(folderPath, force))
+  }
+  return { folders, banner: await bannerRecord() }
+}
+
 export async function init(): Promise<void> {
   await mkdir(app.getPath('userData'), { recursive: true })
-  folderPaths = await readSavedFolders()
+  const saved = await readSavedLibrary()
+  folderPaths = saved.folders
+  bannerPath = saved.banner
 }
 
-export async function list(force = false): Promise<FolderRecord[]> {
-  const rows: FolderRecord[] = []
-  for (const folderPath of folderPaths) {
-    rows.push(await scanOrError(folderPath, force))
-  }
-  return rows
+export async function list(force = false): Promise<LibrarySnapshot> {
+  return snapshot(force)
 }
 
-export async function addFolders(win: BrowserWindow): Promise<FolderRecord[]> {
+export async function addFolders(win: BrowserWindow): Promise<LibrarySnapshot> {
   const picked = await dialog.showOpenDialog(win, {
     title: 'Add a folder',
     buttonLabel: 'Add folder',
@@ -168,26 +193,53 @@ export async function addFolders(win: BrowserWindow): Promise<FolderRecord[]> {
     throw new Error(sawDirectory ? 'That folder is already in the library.' : 'Choose a folder of images.')
   }
   folderPaths = [...fresh, ...folderPaths]
-  await saveFolders()
+  await saveLibrary()
   return list()
 }
 
-export async function removeFolder(folderPath: string): Promise<FolderRecord[]> {
+export async function removeFolder(folderPath: string): Promise<LibrarySnapshot> {
   if (typeof folderPath !== 'string') throw new Error('Missing folder.')
   folderPaths = folderPaths.filter((folder) => !samePath(folder, folderPath))
   cache.delete(pathKey(folderPath))
-  await saveFolders()
+  await saveLibrary()
   return list()
 }
 
-export async function refresh(): Promise<FolderRecord[]> {
+export async function refresh(): Promise<LibrarySnapshot> {
   cache.clear()
   return list(true)
+}
+
+export async function chooseBanner(win: BrowserWindow): Promise<LibrarySnapshot> {
+  const picked = await dialog.showOpenDialog(win, {
+    title: 'Choose a banner',
+    buttonLabel: 'Use as banner',
+    properties: ['openFile'],
+    filters: [{ name: 'Images', extensions: IMAGE_DIALOG_EXTENSIONS }]
+  })
+  if (picked.canceled || picked.filePaths.length === 0) return list()
+  const resolved = resolve(picked.filePaths[0])
+  if (!isImageFileName(resolved)) {
+    throw new Error('Choose a picture. Frames reads JPG, PNG, GIF, WebP, BMP, TIFF, and AVIF.')
+  }
+  const info = await stat(resolved).catch(() => null)
+  if (!info?.isFile() || info.size <= 0) throw new Error('That picture could not be read.')
+  bannerPath = resolved
+  await saveLibrary()
+  return list()
 }
 
 export async function isAllowedFile(filePath: string): Promise<boolean> {
   if (typeof filePath !== 'string' || filePath.length === 0) return false
   const resolved = resolve(filePath)
+  if (bannerPath && samePath(resolved, bannerPath) && isImageFileName(resolved)) {
+    try {
+      const info = await stat(resolved)
+      return info.isFile() && info.size > 0
+    } catch {
+      return false
+    }
+  }
   if (!folderPaths.some((root) => isInside(resolved, root))) return false
   let realFile: string
   try {

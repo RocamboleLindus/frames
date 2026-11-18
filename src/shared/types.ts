@@ -17,6 +17,11 @@ export interface FolderRecord {
   error?: string
 }
 
+export interface LibrarySnapshot {
+  folders: FolderRecord[]
+  banner: ImageRecord | null
+}
+
 export interface ImageDetails {
   path: string
   name: string
@@ -41,10 +46,11 @@ export interface UpdateOutcome {
 }
 
 export interface FramesApi {
-  getLibrary(): Promise<FolderRecord[]>
-  addFolders(): Promise<FolderRecord[]>
-  removeFolder(folderPath: string): Promise<FolderRecord[]>
-  refresh(): Promise<FolderRecord[]>
+  getLibrary(): Promise<LibrarySnapshot>
+  addFolders(): Promise<LibrarySnapshot>
+  removeFolder(folderPath: string): Promise<LibrarySnapshot>
+  refresh(): Promise<LibrarySnapshot>
+  chooseBanner(): Promise<LibrarySnapshot>
   getDetails(filePath: string): Promise<ImageDetails>
   showInFolder(filePath: string): Promise<void>
   getVersion(): Promise<string>

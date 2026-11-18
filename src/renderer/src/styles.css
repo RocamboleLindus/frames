@@ -163,7 +163,9 @@ button.wordmark {
 }
 
 .btn-red:disabled,
-.btn-quiet:disabled {
+.btn-quiet:disabled,
+.btn-light:disabled,
+.btn-ghost:disabled {
   opacity: 0.55;
 }
 
@@ -245,6 +247,17 @@ button.wordmark {
   color: #808080;
   font-size: 13px;
   letter-spacing: 0.03em;
+}
+
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+
+.library-intro .btn-ghost {
+  margin-top: 22px;
 }
 
 .hero {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { FolderRecord } from '@shared/types'
+import type { FolderRecord, ImageRecord, LibrarySnapshot } from '@shared/types'
 import { CarouselRow } from './components/CarouselRow'
 import { EmptyState } from './components/EmptyState'
 import { Hero } from './components/Hero'
@@ -14,9 +14,10 @@ interface Selection {
 
 export default function App() {
   const [library, setLibrary] = useState<FolderRecord[]>([])
+  const [banner, setBanner] = useState<ImageRecord | null>(null)
   const [booting, setBooting] = useState(true)
   const [shellMissing, setShellMissing] = useState(false)
-  const [busyAction, setBusyAction] = useState<'add' | 'refresh' | 'remove' | 'update' | null>(null)
+  const [busyAction, setBusyAction] = useState<'add' | 'refresh' | 'remove' | 'update' | 'banner' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [version, setVersion] = useState('')
@@ -26,9 +27,13 @@ export default function App() {
   const addRef = useRef<() => void>(() => undefined)
 
   const imageCount = library.reduce((total, folder) => total + folder.images.length, 0)
-  const featuredFolder = library.find((folder) => folder.images.length > 0)
-  const featured = featuredFolder?.images[0]
-  const activeFolder = modal ? library.find((folder) => folder.path === modal.folderPath) : undefined
+  const automaticFolder = library.find((folder) => folder.images.length > 0)
+  const featured = banner ?? automaticFolder?.images[0]
+  const featuredHome = featured
+    ? library.find((folder) => folder.images.some((image) => image.path.toLowerCase() === featured.path.toLowerCase()))
+    : undefined
+  const featuredName = featuredHome?.name ?? parentFolderName(featured?.path)
+  const activeFolder = modal ? folderForModal(library, banner, modal) : undefined
 
   useEffect(() => {
     let cancelled = false
@@ -45,8 +50,8 @@ export default function App() {
       .catch(() => undefined)
     window.framesApp
       .getLibrary()
-      .then((rows) => {
-        if (!cancelled) setLibrary(rows)
+      .then((snapshot) => {
+        if (!cancelled) applySnapshot(snapshot)
       })
       .catch((loadError) => {
         if (!cancelled) setError(errorMessage(loadError, 'Could not open the library.'))
@@ -88,13 +93,18 @@ export default function App() {
     if (!folder || !image) setModal(null)
   }, [library, modal])
 
-  async function run(action: 'add' | 'refresh' | 'remove', work: () => Promise<FolderRecord[]>): Promise<void> {
+  function applySnapshot(snapshot: LibrarySnapshot): void {
+    setLibrary(snapshot.folders)
+    setBanner(snapshot.banner)
+  }
+
+  async function run(action: 'add' | 'refresh' | 'remove' | 'banner', work: () => Promise<LibrarySnapshot>): Promise<void> {
     if (busyRef.current) return
     busyRef.current = true
     setBusyAction(action)
     setError(null)
     try {
-      setLibrary(await work())
+      applySnapshot(await work())
     } catch (workError) {
       setError(errorMessage(workError, 'Something went wrong.'))
     } finally {
@@ -105,6 +115,10 @@ export default function App() {
 
   function addFolders(): void {
     void run('add', () => window.framesApp.addFolders())
+  }
+
+  function chooseBanner(): void {
+    void run('banner', () => window.framesApp.chooseBanner())
   }
 
   async function updateApp(): Promise<void> {
@@ -177,16 +191,25 @@ export default function App() {
           </button>
         </div>
       )}
-      {library.length === 0 ? (
-        <EmptyState busy={busyAction !== null} onAdd={addFolders} />
+      {library.length === 0 && !featured ? (
+        <EmptyState
+          busy={busyAction !== null}
+          adding={busyAction === 'add'}
+          choosing={busyAction === 'banner'}
+          onAdd={addFolders}
+          onChooseBanner={chooseBanner}
+        />
       ) : (
         <main>
-          {featuredFolder && featured ? (
+          {featured ? (
             <Hero
               key={featured.path}
-              folder={featuredFolder}
+              folderName={featuredName}
               image={featured}
-              onView={() => openImage(featuredFolder.path, featured.path)}
+              choosing={busyAction === 'banner'}
+              busy={busyAction !== null}
+              onChoose={chooseBanner}
+              onView={() => openImage(featuredHome?.path ?? featured.path, featured.path)}
               onExplorer={() => {
                 void window.framesApp.showInFolder(featured.path).catch((explorerError) => {
                   setError(errorMessage(explorerError, 'Could not open Explorer.'))
@@ -196,7 +219,10 @@ export default function App() {
           ) : (
             <section className="library-intro">
               <h1>No images yet</h1>
-              <p>These folders have no supported images in them. Add a folder of pictures, or remove a row.</p>
+              <p>These folders have no supported images in them. Add a folder of pictures, or choose a banner.</p>
+              <button type="button" className="btn-ghost" onClick={chooseBanner} disabled={busyAction !== null}>
+                {busyAction === 'banner' ? 'Choosing…' : 'Choose banner'}
+              </button>
             </section>
           )}
           <div className={featured ? 'rows overlap' : 'rows'}>
@@ -229,4 +255,21 @@ export default function App() {
       )}
     </div>
   )
+}
+
+function parentFolderName(filePath: string | undefined): string {
+  if (!filePath) return 'Banner'
+  const trimmed = filePath.replace(/[\\/]+$/, '')
+  const slash = Math.max(trimmed.lastIndexOf('\\'), trimmed.lastIndexOf('/'))
+  const parent = slash >= 0 ? trimmed.slice(0, slash) : ''
+  const parentSlash = Math.max(parent.lastIndexOf('\\'), parent.lastIndexOf('/'))
+  const name = parentSlash >= 0 ? parent.slice(parentSlash + 1) : parent
+  return name || 'Banner'
+}
+
+function folderForModal(library: FolderRecord[], banner: ImageRecord | null, modal: Selection): FolderRecord | undefined {
+  const home = library.find((folder) => folder.path === modal.folderPath)
+  if (home?.images.some((image) => image.path === modal.imagePath)) return home
+  if (!banner || banner.path !== modal.imagePath) return undefined
+  return { path: banner.path, name: parentFolderName(banner.path), images: [banner] }
 }

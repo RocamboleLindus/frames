@@ -189,6 +189,10 @@ void app.whenReady().then(async () => {
     return library.removeFolder(folderPath)
   })
   ipcMain.handle('library:refresh', () => library.refresh())
+  ipcMain.handle('library:banner', () => {
+    if (!mainWindow) throw new Error('The window is not ready.')
+    return library.chooseBanner(mainWindow)
+  })
   ipcMain.handle('image:details', (_event, filePath: unknown) => {
     if (typeof filePath !== 'string') throw new Error('Missing file path.')
     return library.getDetails(filePath)

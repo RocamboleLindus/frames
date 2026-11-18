@@ -6,6 +6,7 @@ const api: FramesApi = {
   addFolders: () => ipcRenderer.invoke('library:add'),
   removeFolder: (folderPath) => ipcRenderer.invoke('library:remove', folderPath),
   refresh: () => ipcRenderer.invoke('library:refresh'),
+  chooseBanner: () => ipcRenderer.invoke('library:banner'),
   getDetails: (filePath) => ipcRenderer.invoke('image:details', filePath),
   showInFolder: (filePath) => ipcRenderer.invoke('image:show', filePath),
   getVersion: () => ipcRenderer.invoke('app:version'),
