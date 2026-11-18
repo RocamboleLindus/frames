@@ -1,0 +1,29 @@
+appId: app.frames.viewer
+productName: Frames
+copyright: Copyright 2026 RocamboleLindus
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+extraResources:
+  - from: build/icon.png
+    to: icon.png
+asar: true
+win:
+  target:
+    - nsis
+  icon: build/icon.ico
+  executableName: Frames
+nsis:
+  oneClick: true
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Frames
+  artifactName: Frames-Setup-${version}.${ext}
+publish:
+  provider: github
+  owner: RocamboleLindus
+  repo: frames
